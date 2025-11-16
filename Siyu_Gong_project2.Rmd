@@ -1,0 +1,158 @@
+---
+title: "Siyu Gong Project2"
+author: "Siyu Gong"
+date: "2025-11-15"
+output: word_document
+---
+
+## 1.Setting
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,      
+  message = FALSE,   
+  warning = FALSE    
+)
+library(tidyverse)
+library(lubridate)
+library(mgcv)
+```
+
+## 2.Set Data Cleaning Function
+
+```{r}
+# Data cleaning function
+clean_aq <- function(df) {
+  
+  df_clean <- df %>%
+    # Rename pollutant concentration columns
+    rename(
+      Date = Date,
+      Max_CO = `Daily Max 8-hour CO Concentration`,
+      PM25 = `Daily Mean PM2.5 Concentration`,
+      Max_O3 = `Daily Max 8-hour Ozone Concentration`
+    ) %>%
+    
+    # Format the date variable correctly
+    mutate(Date = mdy(Date)) %>%
+    
+    # Calculate the daily average
+    group_by(Date) %>%
+    summarise(
+      Max_CO = mean(Max_CO, na.rm = TRUE),
+      PM25 = mean(PM25, na.rm = TRUE),
+      Max_O3 = mean(Max_O3, na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    
+    # Remove duplicate rows
+    distinct()
+  
+  # Loop through pollutants, set negative values to zero
+  pollutant_vars <- c("Max_CO", "PM25", "Max_O3")
+  
+  for (v in pollutant_vars) {
+    df_clean[[v]] <- ifelse(df_clean[[v]] < 0, 0, df_clean[[v]])
+  }
+  
+  return(df_clean)
+}
+```
+
+## 3.Data Import, Cleaning and Merge
+
+```{r}
+# Import the Data
+aq18 <- read_csv("AQ_2018.csv", show_col_types = FALSE)
+aq19 <- read_csv("AQ_2019.csv", show_col_types = FALSE)
+aq20 <- read_csv("AQ_2020.csv", show_col_types = FALSE)
+
+# Data Cleaning
+clean18 <- clean_aq(aq18) %>% mutate(year = 2018)
+clean19 <- clean_aq(aq19) %>% mutate(year = 2019)
+clean20 <- clean_aq(aq20) %>% mutate(year = 2020)
+aq_all <- bind_rows(clean18, clean19, clean20) %>%
+  mutate(
+    month = month(Date),
+    year = as.factor(year)
+  )
+
+# Summary of the Cleaned Data
+#summary(clean18)
+#summary(clean19)
+#summary(clean20)
+```
+
+## 4.Plot the Data
+
+```{r}
+# Plot 1
+plot1_data <- aq_all %>%
+group_by(month) %>%
+summarise(
+CO_mean = mean(Max_CO, na.rm = TRUE),
+CO_se   = sd(Max_CO, na.rm = TRUE) / sqrt(n()),
+
+O3_mean = mean(Max_O3, na.rm = TRUE),
+O3_se   = sd(Max_O3, na.rm = TRUE) / sqrt(n())
+
+)
+
+ggplot(plot1_data, aes(x = month)) +
+geom_point(aes(y = CO_mean), color = "blue", size = 2) +
+geom_errorbar(aes(ymin = CO_mean - 1.96 * CO_se,
+ymax = CO_mean + 1.96 * CO_se),
+width = 0.15, color = "blue") +
+
+geom_point(aes(y = O3_mean), color = "red", size = 2) +
+geom_errorbar(aes(ymin = O3_mean - 1.96 * O3_se,
+ymax = O3_mean + 1.96 * O3_se),
+width = 0.15, color = "red") +
+
+labs(title = "Monthly Average CO and O3 (with 95% CI)",
+x = "Month",
+y = "Concentration",
+caption = "CO = blue, O3 = red") +
+theme_minimal()
+```
+
+```{r}
+# Plot 2
+# Compute monthly means
+pm_monthly <- aq_all %>%
+  group_by(year, month) %>%
+  summarise(
+    PM25_mean = mean(PM25, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot: Scatter + Mean Lines
+ggplot() +
+  # scatter layer: all daily observations
+  geom_point(data = aq_all,
+             aes(x = month, y = PM25, color = year),
+             alpha = 0.5, size = 1.5) +
+  
+  # mean line layer
+  geom_line(data = pm_monthly,
+            aes(x = month, y = PM25_mean, color = year, group = year),
+            linewidth = 1.2) +
+  
+  geom_point(data = pm_monthly,
+             aes(x = month, y = PM25_mean, color = year),
+             size = 3) +
+  
+  scale_x_continuous(breaks = 1:12) +
+  labs(
+    title = "Monthly PM2.5 Trends with Scatter Distribution",
+    x = "Month",
+    y = "PM2.5 Concentration (µg/m³)",
+    color = "Year"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "right"
+  )
+```
+
